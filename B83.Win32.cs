@@ -1,6 +1,11 @@
-﻿/* * * * *
+/* * * * *
  * This is a collection of Win API helpers. Mainly dealing with window message hooks
  * and file drag&drop support for Windows standalone Unity applications.
+ * 
+ * 2019.11.28 - Changed the "UnityDragAndDropHook" class to a static class. This
+ *   has been done for IL2CPP support. IL2CPP can not marshall instance method
+ *   callbacks passed to native code. So the callbacks must be static methods.
+ *   Therefore all fields involved also need to be static.
  * 
  * The MIT License (MIT)
  * 
@@ -408,51 +413,49 @@ namespace B83.Win32
 #endif
 
 
-    public class UnityDragAndDropHook
+    public static class UnityDragAndDropHook
     {
         public delegate void DroppedFilesEvent(List<string> aPathNames, POINT aDropPoint);
-        public event DroppedFilesEvent OnDroppedFiles;
+        public static event DroppedFilesEvent OnDroppedFiles;
 
 #if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
 
-        private uint threadId = WinAPI.GetCurrentThreadId();
-        private IntPtr mainWindow;
-        private HookProc m_Callback;
-        private IntPtr m_Hook;
+        private static uint threadId;
+        private static IntPtr mainWindow = IntPtr.Zero;
+        private static IntPtr m_Hook;
+        private static string m_ClassName = "UnityWndClass";
 
-        public UnityDragAndDropHook()
+        // attribute required for IL2CPP, also has to be a static method
+        [AOT.MonoPInvokeCallback(typeof(EnumThreadDelegate))]
+        private static bool EnumCallback(IntPtr W, IntPtr _)
         {
+            if (Window.IsWindowVisible(W) && (mainWindow == IntPtr.Zero || (m_ClassName != null && Window.GetClassName(W) == m_ClassName)))
+            {
+                mainWindow = W;
+            }
+            return true;
+        }
+
+        public static void InstallHook()
+        {
+            threadId = WinAPI.GetCurrentThreadId();
             if (threadId > 0)
-                mainWindow = GetMainWindow(threadId, "UnityWndClass");
-        }
+                Window.EnumThreadWindows(threadId, EnumCallback, IntPtr.Zero);
 
-        public static IntPtr GetMainWindow(uint aThreadId, string aClassName = null)
-        {
-            IntPtr win = IntPtr.Zero;
-            Window.EnumThreadWindows(aThreadId, (W, _) => {
-                if (Window.IsWindowVisible(W) && (win == null || (aClassName != null && Window.GetClassName(W) == aClassName)))
-                    win = W;
-                return true;
-            }, IntPtr.Zero);
-            return win;
-        }
-
-        public void InstallHook()
-        {
             var hModule = WinAPI.GetModuleHandle(null);
-            m_Callback = Callback;
-            m_Hook = WinAPI.SetWindowsHookEx(HookType.WH_GETMESSAGE, m_Callback, hModule, threadId);
+            m_Hook = WinAPI.SetWindowsHookEx(HookType.WH_GETMESSAGE, Callback, hModule, threadId);
             // Allow dragging of files onto the main window. generates the WM_DROPFILES message
             WinAPI.DragAcceptFiles(mainWindow, true);
         }
-        public void UninstallHook()
+        public static void UninstallHook()
         {
             WinAPI.UnhookWindowsHookEx(m_Hook);
             m_Hook = IntPtr.Zero;
         }
 
-
-        private IntPtr Callback(int code, IntPtr wParam, ref MSG lParam)
+        // attribute required for IL2CPP, also has to be a static method
+        [AOT.MonoPInvokeCallback(typeof(HookProc))]
+        private static IntPtr Callback(int code, IntPtr wParam, ref MSG lParam)
         {
             if (code == 0 && lParam.message == WM.DROPFILES)
             {
@@ -477,13 +480,12 @@ namespace B83.Win32
             return WinAPI.CallNextHookEx(m_Hook, code, wParam, ref lParam);
         }
 #else
-        public void InstallHook()
+        public static void InstallHook()
         {
         }
-        public void UninstallHook()
+        public static void UninstallHook()
         {
         }
 #endif
     }
-
 }

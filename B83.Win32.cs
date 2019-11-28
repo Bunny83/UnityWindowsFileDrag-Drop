@@ -418,7 +418,7 @@ namespace B83.Win32
         public delegate void DroppedFilesEvent(List<string> aPathNames, POINT aDropPoint);
         public static event DroppedFilesEvent OnDroppedFiles;
 
-#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
+#if UNITY_STANDALONE_WIN && !UNITY_EDITOR_WIN
 
         private static uint threadId;
         private static IntPtr mainWindow = IntPtr.Zero;
@@ -450,6 +450,7 @@ namespace B83.Win32
         public static void UninstallHook()
         {
             WinAPI.UnhookWindowsHookEx(m_Hook);
+            WinAPI.DragAcceptFiles(mainWindow, false);
             m_Hook = IntPtr.Zero;
         }
 

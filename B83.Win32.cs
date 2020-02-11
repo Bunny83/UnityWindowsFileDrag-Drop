@@ -33,6 +33,9 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+#if UNITY_EDITOR_WIN
+using UnityEditor;
+#endif
 
 namespace B83.Win32
 {
@@ -418,13 +421,17 @@ namespace B83.Win32
         public delegate void DroppedFilesEvent(List<string> aPathNames, POINT aDropPoint);
         public static event DroppedFilesEvent OnDroppedFiles;
 
-#if UNITY_STANDALONE_WIN && !UNITY_EDITOR_WIN
+#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
 
         private static uint threadId;
         private static IntPtr mainWindow = IntPtr.Zero;
         private static IntPtr m_Hook;
         private static string m_ClassName = "UnityWndClass";
-
+#if UNITY_EDITOR_WIN
+        private static EditorWindow m_gameView;
+        private const int shiftGetwindowRect = 8; // GetWindowRect Value is shift(This value is different in windows settings or display resolution)
+        private const int editorTitleMenuUnityToolBarHeight = 73;
+#endif
         // attribute required for IL2CPP, also has to be a static method
         [AOT.MonoPInvokeCallback(typeof(EnumThreadDelegate))]
         private static bool EnumCallback(IntPtr W, IntPtr _)
@@ -446,8 +453,13 @@ namespace B83.Win32
             m_Hook = WinAPI.SetWindowsHookEx(HookType.WH_GETMESSAGE, Callback, hModule, threadId);
             // Allow dragging of files onto the main window. generates the WM_DROPFILES message
             WinAPI.DragAcceptFiles(mainWindow, true);
-        }
-        public static void UninstallHook()
+#if UNITY_EDITOR_WIN
+            var assembly = typeof(EditorWindow).Assembly;
+            var type = assembly.GetType("UnityEditor.GameView");
+            m_gameView = EditorWindow.GetWindow(type);
+#endif
+    }
+    public static void UninstallHook()
         {
             WinAPI.UnhookWindowsHookEx(m_Hook);
             WinAPI.DragAcceptFiles(mainWindow, false);
@@ -463,6 +475,22 @@ namespace B83.Win32
                 POINT pos;
                 WinAPI.DragQueryPoint(lParam.wParam, out pos);
 
+#if UNITY_EDITOR_WIN
+                // Check Drop point is in Game View
+                RECT editorWindowRect;
+                bool isSuccess = Window.GetWindowRect(mainWindow, out editorWindowRect);
+                if (isSuccess)
+                {
+                    UnityEngine.Rect gameVewRectInEditor = m_gameView.position;
+                    gameVewRectInEditor.x -= editorWindowRect.Left + shiftGetwindowRect;
+                    gameVewRectInEditor.y -=
+                        editorWindowRect.Top + shiftGetwindowRect + editorTitleMenuUnityToolBarHeight;
+                    if (!gameVewRectInEditor.Contains(new UnityEngine.Vector2(pos.x, pos.y)))
+                    {
+                        return WinAPI.CallNextHookEx(m_Hook, code, wParam, ref lParam);
+                    }
+                }
+#endif
                 // 0xFFFFFFFF as index makes the method return the number of files
                 uint n = WinAPI.DragQueryFile(lParam.wParam, 0xFFFFFFFF, null, 0);
                 var sb = new System.Text.StringBuilder(1024);
@@ -474,9 +502,12 @@ namespace B83.Win32
                     result.Add(sb.ToString(0, len));
                     sb.Length = 0;
                 }
+
                 WinAPI.DragFinish(lParam.wParam);
-                if (OnDroppedFiles != null)
-                    OnDroppedFiles(result, pos);
+                if (result.Count != 0) // In unity editor, drag and drop file event does not have any file path.
+                {
+                    OnDroppedFiles?.Invoke(result, pos);
+                }
             }
             return WinAPI.CallNextHookEx(m_Hook, code, wParam, ref lParam);
         }

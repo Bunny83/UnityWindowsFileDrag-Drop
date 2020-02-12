@@ -430,7 +430,6 @@ namespace B83.Win32
 #if UNITY_EDITOR_WIN
         private static EditorWindow m_gameView;
         private const int shiftGetwindowRect = 8; // GetWindowRect Value is shift(This value is different in windows settings or display resolution)
-        private const int editorTitleMenuUnityToolBarHeight = 73;
 #endif
         // attribute required for IL2CPP, also has to be a static method
         [AOT.MonoPInvokeCallback(typeof(EnumThreadDelegate))]
@@ -476,19 +475,22 @@ namespace B83.Win32
                 WinAPI.DragQueryPoint(lParam.wParam, out pos);
 
 #if UNITY_EDITOR_WIN
-                // Check Drop point is in Game View
                 RECT editorWindowRect;
                 bool isSuccess = Window.GetWindowRect(mainWindow, out editorWindowRect);
                 if (isSuccess)
                 {
+                    // Check Drop point is in Game View
                     UnityEngine.Rect gameVewRectInEditor = m_gameView.position;
                     gameVewRectInEditor.x -= editorWindowRect.Left + shiftGetwindowRect;
-                    gameVewRectInEditor.y -=
-                        editorWindowRect.Top + shiftGetwindowRect + editorTitleMenuUnityToolBarHeight;
+                    gameVewRectInEditor.y -= editorWindowRect.Top + shiftGetwindowRect;
                     if (!gameVewRectInEditor.Contains(new UnityEngine.Vector2(pos.x, pos.y)))
                     {
                         return WinAPI.CallNextHookEx(m_Hook, code, wParam, ref lParam);
                     }
+
+                    // Convert Drop position to GameView Coordinate
+                    pos.x = pos.x - (int)gameVewRectInEditor.x;
+                    pos.y = pos.y - (int)gameVewRectInEditor.y;
                 }
 #endif
                 // 0xFFFFFFFF as index makes the method return the number of files
